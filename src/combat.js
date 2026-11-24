@@ -164,7 +164,7 @@ export class Combat {
       }
       case 'wave': {
         this.spawnProjectile('wave', {
-          x: playerX, y: 0.35, z: z0,
+          x: playerX, y: 0.45, z: z0,
           vz: -f.speed,
           damage: f.damage * dmgMult, radius: f.radius, range: f.range,
           pierce: f.pierce,

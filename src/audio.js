@@ -38,6 +38,8 @@ class Sfx {
     this.sounds = {};   // name -> { buffer, gain }
     this.voices = 0;
     this.loading = null;
+    this.streaks = {};      // name -> consecutive plays within the streak window
+    this.lastStreak = {};   // name -> timestamp of last streak play
   }
 
   /** Must be called from a user gesture (browser autoplay policy). Idempotent. */
@@ -79,20 +81,33 @@ class Sfx {
   }
 
   /** Play a sound by name. Safe to call before init or for missing sounds. */
-  play(name) {
+  play(name, rate) {
     const ctx = this.ctx;
     const snd = this.sounds[name];
     if (!ctx || ctx.state !== 'running' || !snd || this.voices >= MAX_VOICES) return;
 
     const src = ctx.createBufferSource();
     src.buffer = snd.buffer;
-    src.playbackRate.value = 0.94 + Math.random() * 0.12; // subtle pitch variance
+    src.playbackRate.value = rate ?? 0.94 + Math.random() * 0.12; // subtle pitch variance
     const g = ctx.createGain();
     g.gain.value = snd.gain * (SFX_MIX[name] ?? 1);
     src.connect(g).connect(this.master);
     this.voices++;
     src.onended = () => { this.voices--; };
     src.start();
+  }
+
+  /**
+   * Play with a rising pitch on consecutive plays (combo feel).
+   * Each hit within `window` seconds raises the pitch one semitone, up to `max`.
+   */
+  playStreak(name, { step = 1 / 12, max = 1.6, window = 1.4 } = {}) {
+    const now = performance.now();
+    const chained = now - (this.lastStreak[name] ?? -Infinity) < window * 1000;
+    this.streaks[name] = chained ? (this.streaks[name] ?? 0) + 1 : 0;
+    this.lastStreak[name] = now;
+    const rate = Math.min(2 ** (this.streaks[name] * step), max);
+    this.play(name, rate);
   }
 }
 

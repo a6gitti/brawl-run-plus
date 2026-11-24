@@ -85,7 +85,7 @@ export const BRAWLERS = [
       speed: 24,
       range: 34,
       damage: 2,
-      radius: 0.35,     // generous x/y hitbox for the wave
+      radius: 0.5,      // generous x/y hitbox so the wave reliably clips crates
       pierce: 99,       // pierces essentially the whole lane
     },
   },

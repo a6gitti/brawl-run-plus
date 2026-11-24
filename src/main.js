@@ -5,7 +5,7 @@
 import './style.css';
 import * as THREE from 'three';
 import { BRAWLERS, getBrawler } from './brawlers.js';
-import { World, toonMaterial } from './world.js';
+import { World, LANE_X, toonMaterial } from './world.js';
 import { Combat, checkPlayerHit, collectCubes } from './combat.js';
 import { sfx } from './audio.js';
 
@@ -64,6 +64,7 @@ const player = {
   onGround: true,
   prevOnGround: true,
   fireKick: 0,
+  gravity: -26, // scaled up with game speed for snappier late-game jumps
 };
 player.group.add(player.rig);
 player.group.visible = false;
@@ -544,12 +545,21 @@ function moveLane(dir) {
 function tryJump() {
   if (game.state !== 'playing') return;
   if (player.onGround) {
-    player.vy = 10.5;
+    // scale jump power & gravity together with speed: same arc height,
+    // shorter airtime — lets you chain jumps quickly in the late game
+    const k = jumpScale();
+    player.vy = 10.5 * k;
+    player.gravity = GRAVITY * k;
     player.onGround = false;
     player.ducking = false;
     player.height = 1.8;
     sfx.play('jump');
   }
+}
+
+// jump quickness scales from 1.0 at base speed to ~1.35 at max speed
+function jumpScale() {
+  return 1 + ((game.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED)) * 0.35;
 }
 
 window.addEventListener('keydown', (e) => {
@@ -895,10 +905,15 @@ const FIRE_SFX = { shellby: 'shellby', colton: 'colton', rocko: 'rocko', nitara:
 
 function fire() {
   const dmgMult = 1 + player.powerLevel * 0.25;
-  if (combat.tryFire(player.brawler, player.x, dmgMult)) {
+  // Snap the muzzle to the nearest lane center — firing mid-lane-change used to
+  // spawn projectiles between lanes, missing crates (most visible on Nitara's
+  // narrow wave). Shots now always fly dead-center down a lane.
+  const laneIdx = THREE.MathUtils.clamp(Math.round((player.x + 2.5) / 2.5), 0, 2);
+  const muzzleX = LANE_X[laneIdx];
+  if (combat.tryFire(player.brawler, muzzleX, dmgMult)) {
     player.fireKick = 1; // arms punch / weapons recoil
-    combat.flash(player.x, 1.2, -0.7, 0xffe08a);
-    combat.burst(player.x, 1.1, -0.6, 0xffe08a, 3, 2.5);
+    combat.flash(muzzleX, 1.2, -0.7, 0xffe08a);
+    combat.burst(muzzleX, 1.1, -0.6, 0xffe08a, 3, 2.5);
     sfx.play(FIRE_SFX[player.brawler.id] ?? 'shared');
   }
 }
@@ -927,7 +942,7 @@ function updateRunner(dt) {
     tryJump();
   }
   if (!player.onGround) {
-    player.vy += GRAVITY * dt;
+    player.vy += player.gravity * dt;
     player.y += player.vy * dt;
     if (player.y <= 0) {
       player.y = 0;
@@ -1002,7 +1017,7 @@ function updateCollisions() {
     player.powerLevel += got;
     game.mult = Math.min(3, 1 + player.powerLevel * 0.1);
     combat.burst(player.x, 1.2, 0, 0x39ff6e, 6 * got, 4);
-    sfx.play('cube');
+    sfx.playStreak('cube'); // pitch climbs one semitone per chained pickup
     elPower.textContent = `POWER ${player.powerLevel}`;
     elMult.textContent = `x${game.mult.toFixed(1)}`;
   }

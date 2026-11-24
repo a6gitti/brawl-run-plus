@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { BRAWLERS, getBrawler } from './brawlers.js';
 import { World, toonMaterial } from './world.js';
 import { Combat, checkPlayerHit, collectCubes } from './combat.js';
+import { sfx } from './audio.js';
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -547,6 +548,7 @@ function tryJump() {
     player.onGround = false;
     player.ducking = false;
     player.height = 1.8;
+    sfx.play('jump');
   }
 }
 
@@ -638,6 +640,10 @@ renderer.domElement.addEventListener('pointerdown', onPointerDown);
 window.addEventListener('pointermove', onPointerMove);
 window.addEventListener('pointerup', onPointerUp);
 window.addEventListener('pointercancel', onPointerUp);
+
+// unlock the audio context on the very first interaction (autoplay policy)
+window.addEventListener('pointerdown', () => sfx.init(), { once: true });
+window.addEventListener('keydown', () => sfx.init(), { once: true });
 
 // ---------------------------------------------------------------------------
 // Character-select portraits — hand-drawn SVG faces (no image assets needed),
@@ -804,6 +810,7 @@ let currentBrawler = null;
 
 function startRun(brawler) {
   currentBrawler = brawler;
+  sfx.init(); // user just clicked/pressed a key — safe to unlock audio
   game.state = 'playing';
   game.speed = BASE_SPEED;
   game.score = 0;
@@ -883,12 +890,16 @@ function endRun() {
 // ---------------------------------------------------------------------------
 // Combat trigger
 // ---------------------------------------------------------------------------
+// Fire SFX mapping per brawler (Nitara & Spino share the zap)
+const FIRE_SFX = { shellby: 'shellby', colton: 'colton', rocko: 'rocko', nitara: 'shared', spino: 'shared' };
+
 function fire() {
   const dmgMult = 1 + player.powerLevel * 0.25;
   if (combat.tryFire(player.brawler, player.x, dmgMult)) {
     player.fireKick = 1; // arms punch / weapons recoil
     combat.flash(player.x, 1.2, -0.7, 0xffe08a);
     combat.burst(player.x, 1.1, -0.6, 0xffe08a, 3, 2.5);
+    sfx.play(FIRE_SFX[player.brawler.id] ?? 'shared');
   }
 }
 
@@ -991,6 +1002,7 @@ function updateCollisions() {
     player.powerLevel += got;
     game.mult = Math.min(3, 1 + player.powerLevel * 0.1);
     combat.burst(player.x, 1.2, 0, 0x39ff6e, 6 * got, 4);
+    sfx.play('cube');
     elPower.textContent = `POWER ${player.powerLevel}`;
     elMult.textContent = `x${game.mult.toFixed(1)}`;
   }

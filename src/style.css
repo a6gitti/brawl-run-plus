@@ -203,6 +203,31 @@ html, body {
   border-radius: 999px;
 }
 
+#hud-shield {
+  position: absolute;
+  top: max(78px, calc(env(safe-area-inset-top, 0px) + 72px));
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 3px solid rgba(63, 116, 224, 0.6);
+  border-radius: 999px;
+  padding: 5px 12px 5px 8px;
+  box-shadow: 0 0 14px rgba(63, 116, 224, 0.5);
+}
+
+#hud-powerup + #hud-shield,
+#hud-shield { top: max(78px, calc(env(safe-area-inset-top, 0px) + 72px)); }
+#hud-powerup:not(.hidden) ~ #hud-shield:not(.hidden) { top: max(130px, calc(env(safe-area-inset-top, 0px) + 124px)); }
+
+#pu-shield-hint {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: #9fd8ff;
+}
+
 /* ============ Announce flash ============ */
 #announce {
   position: fixed;

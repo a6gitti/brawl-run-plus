@@ -88,7 +88,7 @@ export class World {
     this.powerups = [];
     this.pools = {
       wall: [], hurdle: [], duckbar: [], crateWood: [], crateGold: [], cube: [],
-      train2: [], train3: [], magnet: [],
+      train2: [], train3: [], station: [], magnet: [], shield: [],
     };
     this.distSinceSpawn = 0;
     this.nextGap = 8;
@@ -447,18 +447,49 @@ export class World {
     return { mesh: g, kind: 'magnet', phase: Math.random() * Math.PI * 2, baseY: 1.0 };
   }
 
-  addPowerup(lane, z) {
-    const e = this.take('magnet', () => this.buildMagnet());
+  addPowerup(lane, z, kind = 'magnet') {
+    const e = this.take(kind, () => this.buildPowerup(kind));
     e.mesh.position.set(LANE_X[lane], e.baseY, z);
     this.powerups.push(e);
+  }
+
+  buildPowerup(kind) {
+    return kind === 'shield' ? this.buildShield() : this.buildMagnet();
+  }
+
+  // Shield pickup: chunky blue hex disc with a white mark — one free hit
+  buildShield() {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.34, 0.09, 6),
+      toonMaterial(0x3f74e0, { emissive: 0x14285c, emissiveIntensity: 0.7 })
+    );
+    body.rotation.x = Math.PI / 2; // face the runner
+    g.add(body);
+    const mark = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.11, 0.05), toonMaterial(0xf4f7ff));
+    mark.position.z = 0.06;
+    mark.rotation.z = 0.6;
+    g.add(mark);
+    const mark2 = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.3, 0.05), toonMaterial(0xf4f7ff));
+    mark2.position.z = 0.06;
+    g.add(mark2);
+    const glowMat = getGlow();
+    if (glowMat) {
+      const glow = new THREE.Sprite(glowMat.clone());
+      glow.material.color = new THREE.Color(0x7fd4ff);
+      glow.scale.setScalar(1.5);
+      g.add(glow);
+    }
+    this.scene.add(g);
+    return { mesh: g, kind: 'shield', phase: Math.random() * Math.PI * 2, baseY: 1.0 };
   }
 
   // -------------------------------------------------------------------------
   // Trains: parked chunky wagons with a rear ladder — run up, grab roof cubes,
   // leap off the far end. Entity anchor = mesh.position.z is the train's REAR.
   // -------------------------------------------------------------------------
-  buildTrain(wagons) {
-    const rampLen = 5, roofH = 2.5, wagonLen = 7.2, gap = 0.5;
+  buildTrain(wagons, gap = 0.5) {
+    const rampLen = 5, roofH = 2.5, wagonLen = 7.2;
     const g = new THREE.Group();
     const wagonColors = [0xffd23e, 0x3aa0ff, 0x4cd964]; // yellow / blue / green
     const roofColor = 0x223066, inkColor = 0x18203a;
@@ -548,6 +579,27 @@ export class World {
     }
     this.addCube(t.x, t.roofH * 0.5 + 0.85, z - t.rampLen * 0.5);
     this.addCrate(t.lane, z - t.len + 4, Math.random() < 0.4, t.roofH + 0.55);
+  }
+
+  /**
+   * The "Rooftop Express": a long 5-wagon station train with a dense cube
+   * field covering its whole rooftop. Run up the ladder and harvest.
+   */
+  spawnStation(z = SPAWN_Z) {
+    const t = this.take('station', () => this.buildTrain(5, 0.2));
+    t.lane = (Math.random() * 3) | 0;
+    t.x = LANE_X[t.lane];
+    t.mesh.position.set(t.x, 0, z);
+    this.trains.push(t);
+
+    const rows = Math.floor((t.len - t.rampLen - 1.5) / 1.2);
+    for (let i = 0; i < rows; i++) {
+      const offs = [[0], [-0.55, 0.55], [0]][i % 3]; // alternating density
+      for (const ox of offs) {
+        this.addCube(t.x + ox, t.roofH + 0.85, z - t.rampLen - 1.5 - i * 1.2);
+      }
+    }
+    this.addCube(t.x, t.roofH * 0.5 + 0.85, z - t.rampLen * 0.5); // ladder guide
   }
 
   /**
@@ -663,10 +715,13 @@ export class World {
       // cube line
       for (let i = 0; i < 5; i++) this.addCube(LANE_X[laneAt(0)], 0.9, z - i * 1.8);
       if (Math.random() < 0.4) this.addCrate(laneAt(1), z + 2);
-    } else if (roll < 0.94) {
+    } else if (roll < 0.925) {
       // magnet power-up — attracts nearby cubes for a few seconds
-      this.addPowerup(laneAt(0), z);
+      this.addPowerup(laneAt(0), z, 'magnet');
       if (Math.random() < 0.5) this.addCube(LANE_X[laneAt(0)], 0.9, z - 1.5);
+    } else if (roll < 0.95) {
+      // shield power-up — one free hit
+      this.addPowerup(laneAt(0), z, 'shield');
     } else {
       // cube arc over a hurdle — jump to collect
       this.addHurdle(laneAt(0), z);
@@ -678,7 +733,7 @@ export class World {
   }
 
   prefill() {
-    this.spawnTrain(-120); // early train encounter
+    this.spawnStation(-120); // showcase the Rooftop Express early
     for (const z of [-40, -70, -100, -132]) this.spawnRow(z);
   }
 
@@ -696,7 +751,7 @@ export class World {
       this.release('crates', c, c.gold ? 'crateGold' : 'crateWood');
     }
     while (this.cubes.length) this.release('cubes', this.cubes[0], 'cube');
-    while (this.powerups.length) this.release('powerups', this.powerups[0], 'magnet');
+    while (this.powerups.length) this.release('powerups', this.powerups[0], this.powerups[0].kind);
     this.distSinceSpawn = 0;
     this.nextGap = 8;
     this.distSinceTrain = 0;
@@ -755,7 +810,7 @@ export class World {
       p.mesh.position.z += dz;
       p.mesh.rotation.y += dt * 3;
       p.mesh.position.y = p.baseY + Math.sin(t * 2.6 + p.phase) * 0.16;
-      if (p.mesh.position.z > KILL_Z) this.release('powerups', p, 'magnet');
+      if (p.mesh.position.z > KILL_Z) this.release('powerups', p, p.kind);
     }
 
     // distance-based row spawning
@@ -766,12 +821,14 @@ export class World {
       this.spawnRow();
     }
 
-    // occasional parked train (never while one is already on the track)
+    // occasional parked train (never while one is already on the track);
+    // roughly a third of them are the long "Rooftop Express" cube station
     this.distSinceTrain += dz;
     if (this.distSinceTrain >= this.nextTrainGap && this.trains.length === 0) {
       this.distSinceTrain = 0;
       this.nextTrainGap = rand(380, 620);
-      this.spawnTrain();
+      if (Math.random() < 0.35) this.spawnStation();
+      else this.spawnTrain();
     }
   }
 }

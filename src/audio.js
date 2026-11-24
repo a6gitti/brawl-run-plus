@@ -46,6 +46,7 @@ class Sfx {
     this.loading = null;
     this.streaks = {};      // name -> consecutive plays within the streak window
     this.lastStreak = {};   // name -> timestamp of last streak play
+    this.music = new Music(this);
   }
 
   /** Must be called from a user gesture (browser autoplay policy). Idempotent. */
@@ -140,6 +141,10 @@ class Sfx {
     const rate = Math.min(2 ** (this.streaks[name] * step), max);
     this.play(name, rate);
   }
+
+  musicStart() { this.music.start(); }
+  musicStop() { this.music.stop(); }
+  musicBpm(b) { this.music.setBpm(b); }
 }
 
 /** True-peak measurement across all channels of a decoded buffer. */
@@ -154,6 +159,120 @@ function levelGain(buffer) {
   }
   if (peak < 0.001) return 1; // silent file, don't blow it up
   return Math.min(MAX_BOOST, TARGET_PEAK / peak);
+}
+
+// ---------------------------------------------------------------------------
+// Procedural music: a 4-bar chiptune loop (bass / hats / kick / sparse lead)
+// scheduled with look-ahead. Tempo follows game speed. Routed through the
+// same limiter chain at a quiet level so it never fights the SFX.
+// ---------------------------------------------------------------------------
+const midiF = (m) => 440 * 2 ** ((m - 69) / 12);
+const BASS = [
+  45, -1, 45, 45, 48, -1, 45, -1, 52, -1, 52, 52, 48, -1, 48, -1,
+  43, -1, 43, 43, 48, -1, 43, -1, 50, -1, 50, 50, 48, -1, 48, -1,
+]; // A-minor groove, 32 eighth-notes
+const LEAD = { 6: 69, 14: 72, 22: 76, 30: 72 }; // sparse sparkle notes
+
+class Music {
+  constructor(sfx) {
+    this.sfx = sfx;
+    this.playing = false;
+    this.step = 0;
+    this.nextT = 0;
+    this.bpm = 130;
+    this.timer = null;
+  }
+
+  start() {
+    const ctx = this.sfx.ctx;
+    if (!ctx || this.playing) return;
+    this.playing = true;
+    this.step = 0;
+    this.nextT = ctx.currentTime + 0.15;
+    if (!this.out) {
+      this.out = ctx.createGain();
+      this.out.gain.value = 0.16; // quiet bed under the SFX
+      this.out.connect(this.sfx.master);
+    }
+    if (!this.noise) { // shared hi-hat noise buffer
+      const n = Math.floor(0.08 * ctx.sampleRate);
+      this.noise = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    }
+    this.timer = setInterval(() => this.schedule(), 25);
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.playing = false;
+  }
+
+  setBpm(b) {
+    this.bpm = Math.min(200, Math.max(90, b));
+  }
+
+  schedule() {
+    const ctx = this.sfx.ctx;
+    if (!ctx || !this.playing) return;
+    const stepDur = 60 / this.bpm / 2; // eighth notes
+    while (this.nextT < ctx.currentTime + 0.15) {
+      this.playStep(this.step, this.nextT);
+      this.nextT += stepDur;
+      this.step = (this.step + 1) % 32;
+    }
+  }
+
+  playStep(s, t) {
+    this.hat(t, s % 4 === 0 ? 0.4 : 0.18);
+    if (s % 8 === 0) this.kick(t);
+    const bass = BASS[s];
+    if (bass >= 0) this.note(midiF(bass), t, 0.16, 'square', 0.42);
+    const lead = LEAD[s];
+    if (lead) this.note(midiF(lead), t, 0.22, 'triangle', 0.3);
+  }
+
+  note(freq, t, dur, type, vol) {
+    const ctx = this.sfx.ctx;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(g).connect(this.out);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  }
+
+  hat(t, vol) {
+    const ctx = this.sfx.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 7000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol * 0.6, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    src.connect(f).connect(g).connect(this.out);
+    src.start(t);
+  }
+
+  kick(t) {
+    const ctx = this.sfx.ctx;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(48, t + 0.1);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+    osc.connect(g).connect(this.out);
+    osc.start(t);
+    osc.stop(t + 0.15);
+  }
 }
 
 export const sfx = new Sfx();

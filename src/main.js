@@ -19,6 +19,7 @@ const elCubes = $('cubes'), elPower = $('power');
 const elCdFill = $('cooldown-fill'), elCdText = $('cooldown-text');
 const elChipColor = $('chip-color'), elChipName = $('chip-name');
 const hudPowerup = $('hud-powerup'), puBar = $('pu-bar');
+const hudShield = $('hud-shield');
 const charSelect = $('char-select'), charCards = $('char-cards');
 const gameOver = $('game-over');
 const elFinalScore = $('final-score'), elFinalCubes = $('final-cubes'), elBestScore = $('best-score');
@@ -98,6 +99,28 @@ function buildMagnetBadge() {
 player.badge = buildMagnetBadge();
 player.badge.visible = false;
 player.group.add(player.badge);
+
+// Shield visualizer: floating blue shield disc above the head while armed
+function buildShieldBadge() {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.26, 0.07, 6),
+    toonMaterial(0x3f74e0, { emissive: 0x14285c, emissiveIntensity: 0.7 })
+  );
+  disc.rotation.x = Math.PI / 2 - 0.4; // tilted to show its face
+  g.add(disc);
+  const mark = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.05), toonMaterial(0xf4f7ff));
+  mark.position.z = 0.05;
+  mark.rotation.z = 0.6;
+  g.add(mark);
+  const mark2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.28, 0.05), toonMaterial(0xf4f7ff));
+  mark2.position.z = 0.05;
+  g.add(mark2);
+  return g;
+}
+player.shieldBadge = buildShieldBadge();
+player.shieldBadge.visible = false;
+player.group.add(player.shieldBadge);
 
 // ---------------------------------------------------------------------------
 // Runner meshes — one chunky low-poly rig per brawler, matching each
@@ -560,6 +583,8 @@ const game = {
   best: Number(localStorage.getItem('brawlrunner.best') ?? 0),
   elapsed: 0,
   magnetT: 0,             // seconds of magnet power-up remaining
+  shield: false,          // one free hit
+  invulnT: 0,             // post-shield-save grace seconds
 };
 const MAGNET_DURATION = 8;
 
@@ -855,6 +880,7 @@ function showCharSelect() {
   charSelect.classList.remove('hidden');
   player.group.visible = false;
   combat.clear();
+  sfx.musicStop();
 }
 
 // ---------------------------------------------------------------------------
@@ -865,6 +891,7 @@ let currentBrawler = null;
 function startRun(brawler) {
   currentBrawler = brawler;
   sfx.init(); // user just clicked/pressed a key — safe to unlock audio
+  sfx.musicStart();
   game.state = 'playing';
   game.speed = BASE_SPEED;
   game.score = 0;
@@ -899,11 +926,16 @@ function startRun(brawler) {
   player.fireKick = 0;
   player.prevOnGround = true;
   game.magnetT = 0;
+  game.shield = false;
+  game.invulnT = 0;
   player.badge.visible = false;
+  player.shieldBadge.visible = false;
+  player.rig.visible = true;
 
   world.reset();
   combat.clear();
   clearPreview();
+  player.rig.visible = true;
 
   charSelect.classList.add('hidden');
   gameOver.classList.add('hidden');
@@ -928,8 +960,13 @@ function endRun() {
   combat.burst(player.x, player.y + 1, 0, 0xff5a5f, 18, 8);
   game.shake = 0.8;
   game.magnetT = 0;
+  game.shield = false;
+  game.invulnT = 0;
   player.badge.visible = false;
-  sfx.play('bust'); // boom — plays once the bust-sfx file is added
+  player.shieldBadge.visible = false;
+  player.rig.visible = true;
+  sfx.musicStop();
+  sfx.play('bust');
 
   const finalScore = Math.floor(game.score);
   if (finalScore > game.best) {
@@ -1072,9 +1109,20 @@ function updateRunner(dt) {
 // ---------------------------------------------------------------------------
 function updateCollisions() {
   const hit = checkPlayerHit(world, player);
-  if (hit) {
-    endRun();
-    return;
+  if (hit && game.invulnT <= 0) {
+    if (game.shield) {
+      // shield save: absorb the hit, shatter, keep running
+      game.shield = false;
+      game.invulnT = 1.1;
+      combat.burst(player.x, player.y + 1, 0, 0x7fd4ff, 16, 6);
+      game.shake = Math.max(game.shake, 0.45);
+      sfx.play('bust');
+      if (hit === 'train') dodgeTrain(world, player.x);
+      else clearHitObstacle(world, hit, player.x);
+    } else {
+      endRun();
+      return;
+    }
   }
   const got = collectCubes(world, player);
   if (got > 0) {
@@ -1087,10 +1135,51 @@ function updateCollisions() {
   }
 
   const pu = collectPowerups(world, player);
-  if (pu > 0) {
-    game.magnetT = MAGNET_DURATION;
-    combat.burst(player.x, 1.2, 0, 0x7fd4ff, 10, 4);
+  for (const kind of pu) {
+    if (kind === 'magnet') {
+      game.magnetT = MAGNET_DURATION;
+      combat.burst(player.x, 1.2, 0, 0x7fd4ff, 10, 4);
+    } else if (kind === 'shield') {
+      game.shield = true;
+      combat.burst(player.x, 1.2, 0, 0x3f74e0, 10, 4);
+    }
     sfx.play('cube');
+  }
+}
+
+// Shield save helper: smash the obstacle we just hit so we can keep running
+function clearHitObstacle(world, hit, px) {
+  if (hit === 'crate') {
+    for (let i = world.crates.length - 1; i >= 0; i--) {
+      const c = world.crates[i];
+      const cp = c.mesh.position;
+      if (Math.abs(cp.z) < 1.0 && Math.abs(px - cp.x) < 1.0) {
+        combat.burst(cp.x, cp.y, cp.z, 0xb5793a, 10, 5);
+        world.release('crates', c, c.gold ? 'crateGold' : 'crateWood');
+      }
+    }
+  } else {
+    for (let i = world.hazards.length - 1; i >= 0; i--) {
+      const h = world.hazards[i];
+      if (h.kind !== hit) continue;
+      const hp = h.mesh.position;
+      const xOver = h.kind === 'duckbar' ? true : Math.abs(px - hp.x) < h.halfW + 0.6;
+      if (Math.abs(hp.z) < 1.0 && xOver) {
+        combat.burst(hp.x, 1, hp.z, 0xff8a5c, 10, 5);
+        world.release('hazards', h, h.kind);
+      }
+    }
+  }
+}
+
+// Shield save vs a train: the train is indestructible — bounce to a free lane
+function dodgeTrain(world, px) {
+  for (const t of world.trains) {
+    const zRear = t.mesh.position.z;
+    if (zRear > -2 && zRear - t.len < 2 && Math.abs(px - t.x) < t.halfW + 0.5) {
+      player.targetLane = (t.lane + 1 + ((Math.random() * 2) | 0)) % 3;
+      return;
+    }
   }
 }
 
@@ -1099,6 +1188,7 @@ function updateCollisions() {
 // ---------------------------------------------------------------------------
 let lastCdReady = true;
 let lastPuActive = false;
+let lastShieldActive = false;
 function updateHUD() {
   elScore.textContent = Math.floor(game.score).toLocaleString();
   elSpeed.textContent = `${Math.round(game.speed * 3.6)} km/h`;
@@ -1122,6 +1212,12 @@ function updateHUD() {
     hudPowerup.classList.toggle('hidden', !puActive);
   }
   if (puActive) puBar.style.width = `${Math.max(0, (game.magnetT / MAGNET_DURATION) * 100)}%`;
+
+  const shieldActive = game.shield;
+  if (shieldActive !== lastShieldActive) {
+    lastShieldActive = shieldActive;
+    hudShield.classList.toggle('hidden', !shieldActive);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,6 +1235,7 @@ function animate() {
     // speed ramp
     game.speed = Math.min(MAX_SPEED, game.speed + SPEED_ACCEL * dt);
     game.score += game.speed * dt * game.mult;
+    sfx.musicBpm(120 + (game.speed - BASE_SPEED) * 4.5); // music pumps with speed
 
     // magnet power-up: timer, on-brawler visualizer, cube attraction
     if (game.magnetT > 0) {
@@ -1154,6 +1251,20 @@ function animate() {
       }
     } else if (player.badge.visible) {
       player.badge.visible = false;
+    }
+
+    // shield visualizer + invulnerability blink
+    if (game.shield) {
+      player.shieldBadge.visible = true;
+      player.shieldBadge.rotation.y += dt * 3;
+      player.shieldBadge.position.set(player.x, player.y + 2.8 + Math.sin(game.elapsed * 2.5) * 0.07, 0);
+    } else if (player.shieldBadge.visible) {
+      player.shieldBadge.visible = false;
+    }
+    if (game.invulnT > 0) {
+      game.invulnT -= dt;
+      player.rig.visible = Math.floor(game.elapsed * 12) % 2 === 0;
+      if (game.invulnT <= 0) player.rig.visible = true;
     }
 
     updateRunner(dt);

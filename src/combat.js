@@ -521,10 +521,10 @@ export function collectCubes(world, player) {
 
 /**
  * Collects any power-ups the runner touches.
- * @returns {number} power-ups collected this frame
+ * @returns {string[]} kinds of power-ups collected this frame ('magnet'|'shield')
  */
 export function collectPowerups(world, player) {
-  let collected = 0;
+  const kinds = [];
   for (let i = world.powerups.length - 1; i >= 0; i--) {
     const p = world.powerups[i];
     const pp = p.mesh.position;
@@ -532,8 +532,8 @@ export function collectPowerups(world, player) {
     if (Math.abs(player.x - pp.x) > 0.95) continue;
     const feet = player.y;
     if (pp.y < feet - 0.35 || pp.y > feet + player.height + 0.5) continue;
-    world.release('powerups', p, 'magnet');
-    collected++;
+    world.release('powerups', p, p.kind);
+    kinds.push(p.kind);
   }
-  return collected;
+  return kinds;
 }

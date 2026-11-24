@@ -85,9 +85,10 @@ export class World {
     this.hazards = [];
     this.cubes = [];
     this.trains = [];
+    this.powerups = [];
     this.pools = {
       wall: [], hurdle: [], duckbar: [], crateWood: [], crateGold: [], cube: [],
-      train2: [], train3: [],
+      train2: [], train3: [], magnet: [],
     };
     this.distSinceSpawn = 0;
     this.nextGap = 8;
@@ -420,6 +421,39 @@ export class World {
   }
 
   // -------------------------------------------------------------------------
+  // Power-ups: horseshoe magnet pickup
+  // -------------------------------------------------------------------------
+  buildMagnet() {
+    const g = new THREE.Group();
+    const arc = new THREE.Mesh(
+      new THREE.TorusGeometry(0.28, 0.1, 8, 14, Math.PI),
+      toonMaterial(0xe23b3b, { emissive: 0x5a0f0f, emissiveIntensity: 0.7 })
+    );
+    g.add(arc);
+    for (const sx of [-0.28, 0.28]) { // silver tips
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.16, 0.2), toonMaterial(0xf4f7ff, { emissive: 0x333333 }));
+      tip.position.set(sx, -0.27, 0);
+      g.add(tip);
+    }
+    const glowMat = getGlow();
+    if (glowMat) { // share the pickup halo look
+      const glow = new THREE.Sprite(glowMat);
+      glow.material = glowMat.clone();
+      glow.material.color = new THREE.Color(0x9fc8ff); // cooler blue-ish glow
+      glow.scale.setScalar(1.4);
+      g.add(glow);
+    }
+    this.scene.add(g);
+    return { mesh: g, kind: 'magnet', phase: Math.random() * Math.PI * 2, baseY: 1.0 };
+  }
+
+  addPowerup(lane, z) {
+    const e = this.take('magnet', () => this.buildMagnet());
+    e.mesh.position.set(LANE_X[lane], e.baseY, z);
+    this.powerups.push(e);
+  }
+
+  // -------------------------------------------------------------------------
   // Trains: parked chunky wagons with a rear ladder — run up, grab roof cubes,
   // leap off the far end. Entity anchor = mesh.position.z is the train's REAR.
   // -------------------------------------------------------------------------
@@ -629,6 +663,10 @@ export class World {
       // cube line
       for (let i = 0; i < 5; i++) this.addCube(LANE_X[laneAt(0)], 0.9, z - i * 1.8);
       if (Math.random() < 0.4) this.addCrate(laneAt(1), z + 2);
+    } else if (roll < 0.94) {
+      // magnet power-up — attracts nearby cubes for a few seconds
+      this.addPowerup(laneAt(0), z);
+      if (Math.random() < 0.5) this.addCube(LANE_X[laneAt(0)], 0.9, z - 1.5);
     } else {
       // cube arc over a hurdle — jump to collect
       this.addHurdle(laneAt(0), z);
@@ -658,6 +696,7 @@ export class World {
       this.release('crates', c, c.gold ? 'crateGold' : 'crateWood');
     }
     while (this.cubes.length) this.release('cubes', this.cubes[0], 'cube');
+    while (this.powerups.length) this.release('powerups', this.powerups[0], 'magnet');
     this.distSinceSpawn = 0;
     this.nextGap = 8;
     this.distSinceTrain = 0;
@@ -708,6 +747,15 @@ export class World {
       c.mesh.rotation.y += dt * 2.4;
       if (c.glow) c.glow.scale.setScalar(1.35 + Math.sin(t * 4.5 + c.phase) * 0.2); // breathing glow
       if (c.mesh.position.z > KILL_Z) this.release('cubes', c, 'cube');
+    }
+
+    // power-ups
+    for (let i = this.powerups.length - 1; i >= 0; i--) {
+      const p = this.powerups[i];
+      p.mesh.position.z += dz;
+      p.mesh.rotation.y += dt * 3;
+      p.mesh.position.y = p.baseY + Math.sin(t * 2.6 + p.phase) * 0.16;
+      if (p.mesh.position.z > KILL_Z) this.release('powerups', p, 'magnet');
     }
 
     // distance-based row spawning

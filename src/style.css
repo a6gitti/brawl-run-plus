@@ -163,6 +163,46 @@ html, body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
+/* ============ Power-up badge ============ */
+#hud-powerup {
+  position: absolute;
+  top: max(78px, calc(env(safe-area-inset-top, 0px) + 72px));
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 3px solid rgba(127, 212, 255, 0.5);
+  border-radius: 999px;
+  padding: 5px 12px 5px 8px;
+  box-shadow: 0 0 14px rgba(127, 212, 255, 0.45);
+}
+
+.pu-icon { font-size: 20px; filter: drop-shadow(0 0 6px rgba(127, 212, 255, 0.8)); }
+
+.pu-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #9fd8ff;
+}
+
+#pu-bar-wrap {
+  width: 84px;
+  height: 8px;
+  background: rgba(10, 12, 28, 0.8);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+#pu-bar {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #7fd4ff, #3f74e0);
+  border-radius: 999px;
+}
+
 /* ============ Announce flash ============ */
 #announce {
   position: fixed;

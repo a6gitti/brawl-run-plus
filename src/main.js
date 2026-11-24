@@ -6,7 +6,7 @@ import './style.css';
 import * as THREE from 'three';
 import { BRAWLERS, SELECTABLE, getBrawler } from './brawlers.js';
 import { World, LANE_X, toonMaterial } from './world.js';
-import { Combat, checkPlayerHit, collectCubes } from './combat.js';
+import { Combat, checkPlayerHit, collectCubes, collectPowerups } from './combat.js';
 import { sfx } from './audio.js';
 
 // ---------------------------------------------------------------------------
@@ -18,6 +18,7 @@ const elScore = $('score'), elMult = $('mult'), elSpeed = $('speed');
 const elCubes = $('cubes'), elPower = $('power');
 const elCdFill = $('cooldown-fill'), elCdText = $('cooldown-text');
 const elChipColor = $('chip-color'), elChipName = $('chip-name');
+const hudPowerup = $('hud-powerup'), puBar = $('pu-bar');
 const charSelect = $('char-select'), charCards = $('char-cards');
 const gameOver = $('game-over');
 const elFinalScore = $('final-score'), elFinalCubes = $('final-cubes'), elBestScore = $('best-score');
@@ -64,11 +65,39 @@ const player = {
   onGround: true,
   prevOnGround: true,
   fireKick: 0,
+  fastFalling: false,
   gravity: -26, // scaled up with game speed for snappier late-game jumps
 };
 player.group.add(player.rig);
 player.group.visible = false;
 scene.add(player.group);
+
+// Magnet power-up visualizer: spinning horseshoe magnet above the head +
+// soft aura ring at the feet. Visible only while the magnet is active.
+function buildMagnetBadge() {
+  const g = new THREE.Group();
+  const arc = new THREE.Mesh(
+    new THREE.TorusGeometry(0.22, 0.075, 8, 14, Math.PI),
+    toonMaterial(0xe23b3b, { emissive: 0x5a0f0f, emissiveIntensity: 0.7 })
+  );
+  g.add(arc);
+  for (const sx of [-0.22, 0.22]) {
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.13, 0.17), toonMaterial(0xf4f7ff));
+    tip.position.set(sx, -0.2, 0);
+    g.add(tip);
+  }
+  const aura = new THREE.Mesh(
+    new THREE.TorusGeometry(0.8, 0.05, 6, 26),
+    toonMaterial(0x7fd4ff, { transparent: true, opacity: 0.55 })
+  );
+  aura.rotation.x = Math.PI / 2;
+  aura.position.y = -2.2; // down at the runner's feet (badge sits ~2.2 up)
+  g.add(aura);
+  return g;
+}
+player.badge = buildMagnetBadge();
+player.badge.visible = false;
+player.group.add(player.badge);
 
 // ---------------------------------------------------------------------------
 // Runner meshes — one chunky low-poly rig per brawler, matching each
@@ -530,7 +559,9 @@ const game = {
   shake: 0,
   best: Number(localStorage.getItem('brawlrunner.best') ?? 0),
   elapsed: 0,
+  magnetT: 0,             // seconds of magnet power-up remaining
 };
+const MAGNET_DURATION = 8;
 
 // ---------------------------------------------------------------------------
 // Input
@@ -540,6 +571,13 @@ const input = { left: false, right: false, up: false, down: false, jumpQueued: f
 function moveLane(dir) {
   if (game.state !== 'playing') return;
   player.targetLane = THREE.MathUtils.clamp(player.targetLane + dir, 0, 2);
+}
+
+// mid-air fast drop: swipe down / press S while jumping to slam down quickly
+function fastFall() {
+  if (game.state !== 'playing' || player.onGround) return;
+  player.vy = Math.min(player.vy, -16);
+  player.fastFalling = true;
 }
 
 function tryJump() {
@@ -553,6 +591,7 @@ function tryJump() {
     player.onGround = false;
     player.ducking = false;
     player.height = 1.8;
+    player.fastFalling = false;
     sfx.play('jump');
   }
 }
@@ -568,7 +607,10 @@ window.addEventListener('keydown', (e) => {
     case 'ArrowRight': case 'KeyD': moveLane(1); e.preventDefault(); break;
     case 'ArrowUp': case 'KeyW': case 'Space':
       input.jumpQueued = true; e.preventDefault(); break;
-    case 'ArrowDown': case 'KeyS': input.down = true; e.preventDefault(); break;
+    case 'ArrowDown': case 'KeyS':
+      input.down = true;
+      if (!player.onGround) fastFall(); // mid-air slam
+      e.preventDefault(); break;
     case 'KeyF': case 'Enter':
       if (game.state === 'playing') fire();
       else if (game.state === 'over') restartRun();
@@ -629,6 +671,7 @@ function onPointerMove(e) {
   } else if (dy >= SWIPE_PX) {
     input.down = true;
     gesture.duckHold = true;
+    if (!player.onGround) fastFall(); // mid-air slam
     gesture.y = e.clientY;
     gesture.moved = true;
   } else if (dy <= -SWIPE_PX) {
@@ -855,6 +898,8 @@ function startRun(brawler) {
   });
   player.fireKick = 0;
   player.prevOnGround = true;
+  game.magnetT = 0;
+  player.badge.visible = false;
 
   world.reset();
   combat.clear();
@@ -882,6 +927,8 @@ function endRun() {
   game.state = 'over';
   combat.burst(player.x, player.y + 1, 0, 0xff5a5f, 18, 8);
   game.shake = 0.8;
+  game.magnetT = 0;
+  player.badge.visible = false;
   sfx.play('bust'); // boom — plays once the bust-sfx file is added
 
   const finalScore = Math.floor(game.score);
@@ -945,13 +992,19 @@ function updateRunner(dt) {
   }
   const groundH = world.groundHeightAt(player.x);
   if (!player.onGround) {
-    player.vy += player.gravity * dt;
+    // fast-fall slams down with extra gravity until landing
+    player.vy += (player.fastFalling ? player.gravity * 2.4 : player.gravity) * dt;
     player.y += player.vy * dt;
     if (player.y <= groundH && player.vy <= 0) {
       // land on the street, the ladder, or a wagon roof (forgiving ledge grab)
       player.y = groundH;
       player.vy = 0;
       player.onGround = true;
+      if (player.fastFalling) {
+        combat.burst(player.x, groundH + 0.15, 0.15, 0xd8d2c4, 14, 3.5); // heavy landing dust
+        game.shake = Math.max(game.shake, 0.25);
+      }
+      player.fastFalling = false;
     }
   } else if (groundH < player.y - 0.05) {
     // the surface dropped away — the train ended: leap off with a little hop
@@ -1032,12 +1085,20 @@ function updateCollisions() {
     elPower.textContent = `POWER ${player.powerLevel}`;
     elMult.textContent = `x${game.mult.toFixed(1)}`;
   }
+
+  const pu = collectPowerups(world, player);
+  if (pu > 0) {
+    game.magnetT = MAGNET_DURATION;
+    combat.burst(player.x, 1.2, 0, 0x7fd4ff, 10, 4);
+    sfx.play('cube');
+  }
 }
 
 // ---------------------------------------------------------------------------
 // HUD
 // ---------------------------------------------------------------------------
 let lastCdReady = true;
+let lastPuActive = false;
 function updateHUD() {
   elScore.textContent = Math.floor(game.score).toLocaleString();
   elSpeed.textContent = `${Math.round(game.speed * 3.6)} km/h`;
@@ -1054,6 +1115,13 @@ function updateHUD() {
       ? 'linear-gradient(90deg, #39ff6e, #0d9c3e)'
       : 'linear-gradient(90deg, #ffe14d, #ff9f1c)';
   }
+
+  const puActive = game.magnetT > 0;
+  if (puActive !== lastPuActive) {
+    lastPuActive = puActive;
+    hudPowerup.classList.toggle('hidden', !puActive);
+  }
+  if (puActive) puBar.style.width = `${Math.max(0, (game.magnetT / MAGNET_DURATION) * 100)}%`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,6 +1139,22 @@ function animate() {
     // speed ramp
     game.speed = Math.min(MAX_SPEED, game.speed + SPEED_ACCEL * dt);
     game.score += game.speed * dt * game.mult;
+
+    // magnet power-up: timer, on-brawler visualizer, cube attraction
+    if (game.magnetT > 0) {
+      game.magnetT -= dt;
+      player.badge.visible = true;
+      player.badge.rotation.y += dt * 4;
+      player.badge.position.set(player.x, player.y + 2.25 + Math.sin(game.elapsed * 3) * 0.08, 0);
+      for (const c of world.cubes) { // pull nearby cubes toward the runner
+        const cp = c.mesh.position;
+        if (cp.z < -6 || cp.z > 1.6) continue;
+        const k = Math.min(1, 12 * dt);
+        cp.x += (player.x - cp.x) * k;
+      }
+    } else if (player.badge.visible) {
+      player.badge.visible = false;
+    }
 
     updateRunner(dt);
     world.update(dt, game.speed);

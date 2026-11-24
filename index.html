@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>BrawlRun+ — 3D Endless Runner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Nunito:wght@700;800;900&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- ============ HUD ============ -->
+    <div id="hud" class="hidden">
+      <div id="hud-score" class="hud-panel">
+        <div class="hud-label">SCORE</div>
+        <div id="score" class="hud-value">0</div>
+        <div id="mult" class="hud-mult">x1.0</div>
+      </div>
+      <div id="hud-speed" class="hud-panel">
+        <div class="hud-label">SPEED</div>
+        <div id="speed" class="hud-value">0</div>
+      </div>
+      <div id="hud-cubes" class="hud-panel">
+        <div class="cube-icon"></div>
+        <div>
+          <div id="cubes" class="hud-value">0</div>
+          <div id="power" class="hud-mult">POWER 0</div>
+        </div>
+      </div>
+      <div id="hud-bottom">
+        <div id="brawler-chip">
+          <div id="chip-color"></div>
+          <div id="chip-name">—</div>
+        </div>
+        <div id="cooldown-wrap">
+          <div id="cooldown-fill"></div>
+          <div id="cooldown-text">READY</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="announce"></div>
+
+    <!-- ============ CHARACTER SELECT ============ -->
+    <div id="char-select">
+      <div class="select-inner">
+        <h1 class="game-title">BRAWL<span>RUN+</span></h1>
+        <p class="subtitle">PICK YOUR BRAWLER</p>
+        <div id="char-cards"></div>
+        <p class="controls-hint">
+          <b>Drag / Swipe</b> switch lanes &nbsp;·&nbsp; <b>Swipe ↑</b> jump &nbsp;·&nbsp;
+          <b>Swipe ↓</b> duck &nbsp;·&nbsp; <b>Tap / Click</b> attack<br />
+          Keyboard: <b>A/D</b> lanes &nbsp;·&nbsp; <b>W/↑/Space</b> jump &nbsp;·&nbsp;
+          <b>S/↓</b> duck &nbsp;·&nbsp; <b>F/Enter</b> attack
+        </p>
+      </div>
+    </div>
+
+    <!-- ============ GAME OVER ============ -->
+    <div id="game-over" class="hidden">
+      <div class="over-inner">
+        <h2 class="over-title">BUSTED!</h2>
+        <div class="over-stats">
+          <div class="stat"><span class="hud-label">SCORE</span><span id="final-score" class="hud-value">0</span></div>
+          <div class="stat"><span class="hud-label">CUBES</span><span id="final-cubes" class="hud-value">0</span></div>
+          <div class="stat"><span class="hud-label">BEST</span><span id="best-score" class="hud-value">0</span></div>
+        </div>
+        <div class="over-buttons">
+          <button id="btn-restart" class="btn btn-primary">RUN AGAIN&nbsp; <small>(R)</small></button>
+          <button id="btn-select" class="btn btn-ghost">SWITCH BRAWLER</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -15,6 +15,7 @@ const SFX_FILES = {
   rocko: 'sfx/gun-rocko-sfx.mp3',
   shared: 'sfx/gun-nitara-spino.mp3', // Nitara & Spino share the wave/orb zap
   jump: 'sfx/jump-sfx.mp3',
+  bust: 'sfx/bust-sfx.mp3',           // drop your boom file here: public/sfx/bust-sfx.mp3
 };
 
 // Per-sound relative loudness on top of normalization (fine tuning by role)
@@ -25,6 +26,7 @@ const SFX_MIX = {
   colton: 0.9,
   rocko: 1.0,
   shared: 0.9,
+  bust: 1.0,
 };
 
 const TARGET_PEAK = 0.42;  // every sound is scaled so its peak lands here

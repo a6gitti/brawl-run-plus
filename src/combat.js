@@ -100,12 +100,12 @@ export class Combat {
   // -------------------------------------------------------------------------
   // Fire modes
   // -------------------------------------------------------------------------
-  tryFire(brawler, playerX, damageMult) {
+  tryFire(brawler, playerX, playerY, damageMult) {
     if (this.cooldown > 0) return false;
     const f = brawler.fire;
     this.cooldown = f.cooldown;
     this.cooldownMax = f.cooldown;
-    this.spawnByType(f, brawler.colors.accent, playerX, damageMult);
+    this.spawnByType(f, brawler.colors.accent, playerX, playerY, damageMult);
     return true;
   }
 
@@ -129,8 +129,8 @@ export class Combat {
     });
   }
 
-  spawnByType(f, accent, playerX, dmgMult) {
-    const z0 = 0.6, y0 = 1.1;
+  spawnByType(f, accent, playerX, playerY, dmgMult) {
+    const z0 = 0.6, y0 = playerY + 1.1;
     switch (f.type) {
       case 'spread': {
         const n = f.pellets;
@@ -164,7 +164,7 @@ export class Combat {
       }
       case 'wave': {
         this.spawnProjectile('wave', {
-          x: playerX, y: 0.45, z: z0,
+          x: playerX, y: playerY + 0.45, z: z0,
           vz: -f.speed,
           damage: f.damage * dmgMult, radius: f.radius, range: f.range,
           pierce: f.pierce,
@@ -224,6 +224,18 @@ export class Combat {
         this.damageCrate(crate, damage, crate.mesh.position);
       }
     }
+    for (const h of [...this.world.hazards]) { // splash also breaks walls
+      if (h.kind !== 'wall') continue;
+      const hp = h.mesh.position;
+      if (Math.abs(hp.x - x) <= radius && Math.abs(hp.z - z) <= radius) {
+        h.hp -= damage;
+        if (h.hp <= 0) {
+          this.burst(hp.x, 1.2, hp.z, 0xff6b4a, 10, 5);
+          this.hooks.addScore(50);
+          this.world.release('hazards', h, 'wall');
+        }
+      }
+    }
   }
 
   splitOrb(x, y, z, f, dmgMult) {
@@ -252,7 +264,8 @@ export class Combat {
       this.burst(p.x, p.y, p.z, crate.gold ? 0xffc93e : 0xb5793a, crate.gold ? 14 : 9, 5);
       this.hooks.addScore(crate.gold ? 100 : 25);
       const drops = crate.gold ? 2 : 1;
-      for (let i = 0; i < drops; i++) this.world.dropCube(p.x + rand(-0.3, 0.3), p.z);
+      const dropY = p.y > 2 ? p.y + 0.35 : 0.9; // roof crates drop cubes on the roof
+      for (let i = 0; i < drops; i++) this.world.dropCube(p.x + rand(-0.3, 0.3), p.z, dropY);
       this.world.release('crates', crate, crate.gold ? 'crateGold' : 'crateWood');
     }
   }
@@ -326,7 +339,7 @@ export class Combat {
       }
 
       if (!dead) {
-        // --- unbreakable walls absorb projectiles ---
+        // --- walls absorb projectiles but take damage and can be broken open ---
         for (const h of world.hazards) {
           if (h.kind !== 'wall') continue;
           const hp = h.mesh.position;
@@ -340,9 +353,40 @@ export class Combat {
           if (p.kind === 'orb') {
             this.splitOrb(mesh.position.x, mesh.position.y, hp.z, ORB_REF, ORB_MULT);
           }
-          this.burst(mesh.position.x, mesh.position.y, hp.z + h.halfD, 0xffb4a2, 4, 3);
-          dead = true;
+          if (p.kind === 'rocket') {
+            this.explode(mesh.position.x, mesh.position.y, hp.z, ROCKET_SPLASH.radius, ROCKET_SPLASH.damage);
+          } else {
+            this.burst(mesh.position.x, mesh.position.y, hp.z + h.halfD, 0xffb4a2, 4, 3);
+          }
+
+          h.hp -= p.damage;
+          h.mesh.scale.setScalar(1.06); // damage pulse
+          if (h.hp <= 0) {
+            this.burst(hp.x, 1.2, hp.z, 0xff6b4a, 12, 5);
+            this.hooks.addScore(50);
+            this.world.release('hazards', h, 'wall');
+          }
+          // waves punch straight through a freshly broken wall
+          if (!(p.pierce > 0 && h.hp <= 0)) dead = true;
           break;
+        }
+
+        // --- trains absorb shots (solid metal, no damage) ---
+        if (!dead) {
+          for (const t of world.trains) {
+            const zRear = t.mesh.position.z;
+            const zFront = zRear - t.len;
+            const zOverlap =
+              Math.min(prevZ, mesh.position.z) - p.radius <= zRear &&
+              Math.max(prevZ, mesh.position.z) + p.radius >= zFront;
+            if (!zOverlap) continue;
+            if (Math.abs(mesh.position.x - t.x) > t.halfW + p.radius) continue;
+            if (mesh.position.y - p.radius >= t.roofH) continue; // shots from the roof fly over
+
+            this.burst(mesh.position.x, mesh.position.y, Math.max(zFront, Math.min(zRear, mesh.position.z)) + 0.3, 0xd7e3ee, 4, 3);
+            dead = true;
+            break;
+          }
         }
       }
 
@@ -394,14 +438,17 @@ export class Combat {
 let ORB_REF = null;
 let ORB_MULT = 1;
 
+// Rocket splash constants (mirror Rocko's fire config for wall impacts)
+const ROCKET_SPLASH = { radius: 3.2, damage: 3 };
+
 // Wrap spawnByType so orb fires record their config for later bursting.
 const _origSpawnByType = Combat.prototype.spawnByType;
-Combat.prototype.spawnByType = function (f, accent, playerX, dmgMult) {
+Combat.prototype.spawnByType = function (f, accent, playerX, playerY, dmgMult) {
   if (f.type === 'orb') {
     ORB_REF = f;
     ORB_MULT = dmgMult;
   }
-  return _origSpawnByType.call(this, f, accent, playerX, dmgMult);
+  return _origSpawnByType.call(this, f, accent, playerX, playerY, dmgMult);
 };
 
 // ---------------------------------------------------------------------------
@@ -430,6 +477,18 @@ export function checkPlayerHit(world, player) {
     } else if (h.kind === 'duckbar') {
       if (py + ph > h.bottom) return 'duckbar';
     }
+  }
+
+  // trains: lethal only if the runner is inside the wagon volume while the
+  // walkable surface under them is street level (i.e. they slammed into the
+  // side). On the ladder or roof the surface carries them, so it's safe.
+  const groundH = world.groundHeightAt(px);
+  for (const t of world.trains) {
+    const zRear = t.mesh.position.z;
+    const zFront = zRear - t.len;
+    if (zFront - sweep > pz || zRear + sweep < pz) continue;
+    if (Math.abs(px - t.x) > t.halfW + pw) continue;
+    if (py < t.roofH - 0.5 && py < groundH - 0.3) return 'train';
   }
 
   for (const c of world.crates) {

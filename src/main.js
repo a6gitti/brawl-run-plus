@@ -879,8 +879,9 @@ $('btn-select').addEventListener('click', showCharSelect);
 
 function endRun() {
   game.state = 'over';
-  combat.burst(player.x, 1, 0, 0xff5a5f, 18, 8);
+  combat.burst(player.x, player.y + 1, 0, 0xff5a5f, 18, 8);
   game.shake = 0.8;
+  sfx.play('bust'); // boom — plays once the bust-sfx file is added
 
   const finalScore = Math.floor(game.score);
   if (finalScore > game.best) {
@@ -910,10 +911,10 @@ function fire() {
   // narrow wave). Shots now always fly dead-center down a lane.
   const laneIdx = THREE.MathUtils.clamp(Math.round((player.x + 2.5) / 2.5), 0, 2);
   const muzzleX = LANE_X[laneIdx];
-  if (combat.tryFire(player.brawler, muzzleX, dmgMult)) {
+  if (combat.tryFire(player.brawler, muzzleX, player.y, dmgMult)) {
     player.fireKick = 1; // arms punch / weapons recoil
-    combat.flash(muzzleX, 1.2, -0.7, 0xffe08a);
-    combat.burst(muzzleX, 1.1, -0.6, 0xffe08a, 3, 2.5);
+    combat.flash(muzzleX, player.y + 1.2, -0.7, 0xffe08a);
+    combat.burst(muzzleX, player.y + 1.1, -0.6, 0xffe08a, 3, 2.5);
     sfx.play(FIRE_SFX[player.brawler.id] ?? 'shared');
   }
 }
@@ -936,19 +937,28 @@ function updateRunner(dt) {
     player.height = wantDuck ? 1.0 : 1.8;
   }
 
-  // jump / gravity
+  // jump / gravity — ground can now be street, ladder, or a train roof
   if (input.jumpQueued) {
     input.jumpQueued = false;
     tryJump();
   }
+  const groundH = world.groundHeightAt(player.x);
   if (!player.onGround) {
     player.vy += player.gravity * dt;
     player.y += player.vy * dt;
-    if (player.y <= 0) {
-      player.y = 0;
+    if (player.y <= groundH && player.vy <= 0) {
+      // land on the street, the ladder, or a wagon roof (forgiving ledge grab)
+      player.y = groundH;
       player.vy = 0;
       player.onGround = true;
     }
+  } else if (groundH < player.y - 0.05) {
+    // the surface dropped away — the train ended: leap off with a little hop
+    player.onGround = false;
+    player.vy = 2.0;
+  } else {
+    // follow rising/falling ground: the ladder carries the runner up
+    player.y = groundH;
   }
 
   // transforms + run animation (rig faces -z, so lean/pitch are negated
@@ -1081,15 +1091,15 @@ function animate() {
   // decay screen shake
   game.shake = Math.max(0, game.shake - dt * 1.6);
 
-  // follow camera (playing / game-over)
+  // follow camera (playing / game-over) — rises with the runner on trains
   if (game.state !== 'select') {
-    const targetPos = new THREE.Vector3(player.x * 0.45, 5.4, 8.2);
+    const targetPos = new THREE.Vector3(player.x * 0.45, 5.4 + player.y * 0.45, 8.2);
     camera.position.lerp(targetPos, Math.min(1, 8 * dt));
     if (game.shake > 0) {
       camera.position.x += (Math.random() - 0.5) * game.shake * 0.5;
       camera.position.y += (Math.random() - 0.5) * game.shake * 0.5;
     }
-    camera.lookAt(player.x * 0.55, 1.4, -8);
+    camera.lookAt(player.x * 0.55, 1.4 + player.y * 0.5, -8);
   }
 
   renderer.render(scene, camera);

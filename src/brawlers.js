@@ -18,7 +18,7 @@ export const BRAWLERS = [
     stats: { power: 4, speed: 3, control: 3 },
     fire: {
       type: 'spread',
-      cooldown: 1.3,
+      cooldown: 0.7,
       pellets: 5,
       spreadX: 3.4,     // lateral velocity spread (units/sec)
       speed: 34,        // forward projectile speed
@@ -39,7 +39,7 @@ export const BRAWLERS = [
     stats: { power: 2, speed: 5, control: 5 },
     fire: {
       type: 'stream',
-      cooldown: 0.95,
+      cooldown: 0.5,
       bullets: 6,
       spacing: 1.1,     // z-gap between the bullets of one burst
       speed: 55,
@@ -60,7 +60,7 @@ export const BRAWLERS = [
     stats: { power: 5, speed: 2, control: 2 },
     fire: {
       type: 'rocket',
-      cooldown: 1.7,
+      cooldown: 0.9,
       speed: 26,
       range: 60,
       damage: 4,
@@ -81,7 +81,7 @@ export const BRAWLERS = [
     stats: { power: 3, speed: 4, control: 3 },
     fire: {
       type: 'wave',
-      cooldown: 1.5,
+      cooldown: 0.8,
       speed: 24,
       range: 34,
       damage: 2,
@@ -101,7 +101,7 @@ export const BRAWLERS = [
     stats: { power: 4, speed: 3, control: 2 },
     fire: {
       type: 'orb',
-      cooldown: 1.6,
+      cooldown: 0.85,
       speed: 30,
       range: 50,
       damage: 2,

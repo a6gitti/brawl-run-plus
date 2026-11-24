@@ -58,11 +58,15 @@ export class World {
     this.crates = [];
     this.hazards = [];
     this.cubes = [];
+    this.trains = [];
     this.pools = {
       wall: [], hurdle: [], duckbar: [], crateWood: [], crateGold: [], cube: [],
+      train2: [], train3: [],
     };
     this.distSinceSpawn = 0;
     this.nextGap = 8;
+    this.distSinceTrain = 0;
+    this.nextTrainGap = 420;
 
     this.buildEnvironment();
     this.buildTrack();
@@ -342,11 +346,138 @@ export class World {
   }
 
   // -------------------------------------------------------------------------
+  // Trains: parked chunky wagons with a rear ladder — run up, grab roof cubes,
+  // leap off the far end. Entity anchor = mesh.position.z is the train's REAR.
+  // -------------------------------------------------------------------------
+  buildTrain(wagons) {
+    const rampLen = 5, roofH = 2.5, wagonLen = 7.2, gap = 0.5;
+    const g = new THREE.Group();
+    const wagonColors = [0xffd23e, 0x3aa0ff, 0x4cd964]; // yellow / blue / green
+    const roofColor = 0x223066, inkColor = 0x18203a;
+
+    // ladder/ramp at the rear: local z 0 (ground) rising to -rampLen (roof)
+    const slopeLen = Math.hypot(rampLen, roofH) + 0.3;
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.14, slopeLen), toonMaterial(0x8fa3b8));
+    plank.position.set(0, roofH / 2 - 0.07, -rampLen / 2);
+    plank.rotation.x = Math.atan2(roofH, rampLen); // tips the -z end up
+    plank.castShadow = true;
+    plank.receiveShadow = true;
+    g.add(plank);
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 6;
+      const rung = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.07, 0.24), toonMaterial(0xd7e3ee));
+      rung.position.set(0, roofH * t + 0.08, -rampLen * t);
+      g.add(rung);
+    }
+
+    // wagons
+    const startZ = -(rampLen + 0.6);
+    for (let k = 0; k < wagons; k++) {
+      const cz = startZ - wagonLen / 2 - k * (wagonLen + gap);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.75, wagonLen), toonMaterial(wagonColors[k % 3]));
+      body.position.set(0, 1.42, cz);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      g.add(body);
+
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(2.45, 0.28, wagonLen + 0.3), toonMaterial(roofColor));
+      roof.position.set(0, 2.45, cz);
+      roof.castShadow = true;
+      g.add(roof);
+
+      const skirt = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.3, wagonLen), toonMaterial(inkColor));
+      skirt.position.set(0, 0.5, cz);
+      g.add(skirt);
+
+      for (const sx of [-1, 1]) { // big dark windows on both sides
+        for (const wz of [-2.1, 0, 2.1]) {
+          const win = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.75, 1.15), toonMaterial(0x18223f));
+          win.position.set(sx * 1.13, 1.55, cz + wz);
+          g.add(win);
+        }
+      }
+      for (const sx of [-1, 1]) { // chunky wheels
+        for (const wz of [-2.4, 2.4]) {
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10), toonMaterial(0x2a2f45));
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.set(sx * 1.0, 0.34, cz + wz);
+          wheel.castShadow = true;
+          g.add(wheel);
+        }
+      }
+    }
+
+    // smiling engine face on the very front
+    const faceZ = startZ - (wagons - 1) * (wagonLen + gap) - wagonLen;
+    const face = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.75, 0.14), toonMaterial(0xffd23e));
+    face.position.set(0, 1.42, faceZ - 0.02);
+    g.add(face);
+    for (const sx of [-0.6, 0.6]) { // headlights
+      const light = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), toonMaterial(0xfff6cf, { emissive: 0x776600 }));
+      light.position.set(sx, 0.95, faceZ - 0.12);
+      g.add(light);
+    }
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.5, 0.12), toonMaterial(0x18223f));
+    grille.position.set(0, 1.8, faceZ - 0.1);
+    g.add(grille);
+
+    this.scene.add(g);
+    const len = rampLen + 0.6 + wagons * wagonLen + (wagons - 1) * gap;
+    return { mesh: g, wagons, len, rampLen, roofH, halfW: 1.15, lane: 1, x: 0 };
+  }
+
+  spawnTrain(z = SPAWN_Z) {
+    const wagons = Math.random() < 0.5 ? 2 : 3;
+    const t = this.take(wagons === 2 ? 'train2' : 'train3', () => this.buildTrain(wagons));
+    t.lane = (Math.random() * 3) | 0;
+    t.x = LANE_X[t.lane];
+    t.mesh.position.set(t.x, 0, z);
+    this.trains.push(t);
+
+    // cube trail along the roof + guide cube mid-ladder + bonus roof crate
+    for (let i = 0; i < 4 + wagons * 3; i++) {
+      this.addCube(t.x, t.roofH + 0.85, z - t.rampLen - 2 - i * 1.5);
+    }
+    this.addCube(t.x, t.roofH * 0.5 + 0.85, z - t.rampLen * 0.5);
+    this.addCrate(t.lane, z - t.len + 4, Math.random() < 0.4, t.roofH + 0.55);
+  }
+
+  /**
+   * Walkable surface height under x on the street plane:
+   * 0 (street), rising ladder height, or a wagon roof.
+   */
+  groundHeightAt(x) {
+    let h = 0;
+    for (const t of this.trains) {
+      if (Math.abs(x - t.x) > t.halfW) continue;
+      const zRear = t.mesh.position.z;
+      const zFront = zRear - t.len;
+      if (0 <= zRear && 0 >= zRear - t.rampLen) {
+        // on the ladder: height rises as it slides under the runner
+        h = Math.max(h, (t.roofH * (zRear - 0)) / t.rampLen);
+      } else if (0 >= zFront && 0 <= zRear - t.rampLen) {
+        h = Math.max(h, t.roofH);
+      }
+    }
+    return h;
+  }
+
+  /** Lane occupied by a train that hasn't fully spawned past SPAWN_Z yet. */
+  blockedLane() {
+    for (const t of this.trains) {
+      if (t.mesh.position.z - t.len < SPAWN_Z + 2) return t.lane;
+    }
+    return -1;
+  }
+
+  // -------------------------------------------------------------------------
   // Spawning API
   // -------------------------------------------------------------------------
   addWall(lane, z) {
     const e = this.take('wall', () => this.buildWall());
     e.mesh.position.set(LANE_X[lane], 1.3, z);
+    e.mesh.scale.setScalar(1);
+    e.hp = 6; // destructible: ~2-3 solid hits
     this.hazards.push(e);
   }
 
@@ -362,11 +493,13 @@ export class World {
     this.hazards.push(e);
   }
 
-  addCrate(lane, z, gold = false) {
+  addCrate(lane, z, gold = false, y = 0.55) {
     const e = this.take(gold ? 'crateGold' : 'crateWood', () => this.buildCrate(gold));
-    e.mesh.position.set(LANE_X[lane] + rand(-0.35, 0.35), 0.55, z);
+    e.mesh.position.set(LANE_X[lane] + rand(-0.35, 0.35), y, z);
     e.mesh.rotation.y = rand(-0.3, 0.3);
+    e.mesh.scale.setScalar(1);
     e.hp = gold ? 6 : 3;
+    e.top = y + 0.55; // absolute surface height (roof crates sit higher)
     this.crates.push(e);
   }
 
@@ -377,61 +510,71 @@ export class World {
     this.cubes.push(e);
   }
 
-  dropCube(x, z) {
-    this.addCube(x, 0.9, z + rand(-0.4, 0.4));
+  dropCube(x, z, y = 0.9) {
+    this.addCube(x, y, z + rand(-0.4, 0.4));
   }
 
   // One row of content at depth z. Patterns always leave at least one lane
-  // survivable (via switching, jumping or ducking).
+  // survivable (via switching, jumping or ducking). While a train occupies the
+  // deep track, its lane is off-limits and full-width duck bars are rerolled.
   spawnRow(z = SPAWN_Z + rand(-2, 2)) {
-    const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
-    const roll = Math.random();
+    const blocked = this.blockedLane();
+    const free = [0, 1, 2].filter((l) => l !== blocked);
+    const lanes = free.sort(() => Math.random() - 0.5);
+    const laneAt = (i) => lanes[i % lanes.length];
+    let roll = Math.random();
+    if (blocked !== -1) roll = 0.5 + roll * 0.45; // remap into crate/cube patterns
 
     if (roll < 0.14) {
-      // wall(s) — must switch lanes
-      this.addWall(lanes[0], z);
-      if (Math.random() < 0.45) this.addWall(lanes[1], z + rand(-0.5, 0.5));
+      // destructible wall(s) — shoot them open or dodge
+      this.addWall(laneAt(0), z);
+      if (Math.random() < 0.45) this.addWall(laneAt(1), z + rand(-0.5, 0.5));
     } else if (roll < 0.28) {
-      // hurdles across all lanes — jump!
-      for (const l of lanes) this.addHurdle(l, z + rand(-0.4, 0.4));
-      if (Math.random() < 0.5) this.addCube(LANE_X[lanes[0]], 1.7, z - 1.6);
+      // hurdles across the open lanes — jump!
+      for (const l of free) this.addHurdle(l, z + rand(-0.4, 0.4));
+      if (Math.random() < 0.5) this.addCube(LANE_X[laneAt(0)], 1.7, z - 1.6);
     } else if (roll < 0.40) {
       // full-width duck bar — duck!
       this.addDuckBar(z);
     } else if (roll < 0.50) {
       // hurdle + wall mix
-      this.addHurdle(lanes[0], z);
-      this.addWall(lanes[1], z + rand(-0.5, 0.5));
+      this.addHurdle(laneAt(0), z);
+      this.addWall(laneAt(1), z + rand(-0.5, 0.5));
     } else if (roll < 0.68) {
       // crate cluster (+ occasional reward cube on top)
       const gold = Math.random() < 0.25;
-      this.addCrate(lanes[0], z, gold);
-      if (Math.random() < 0.45) this.addCrate(lanes[0] === lanes[1] ? (lanes[1] + 1) % 3 : lanes[1], z + rand(-1.5, 1.5));
-      if (Math.random() < 0.35) this.addCube(LANE_X[lanes[2]], 0.9, z);
+      this.addCrate(laneAt(0), z, gold);
+      if (Math.random() < 0.45) this.addCrate(laneAt(1), z + rand(-1.5, 1.5));
+      if (Math.random() < 0.35) this.addCube(LANE_X[laneAt(2) ?? laneAt(0)], 0.9, z);
     } else if (roll < 0.78) {
       // golden crate guarded by walls
-      this.addCrate(lanes[0], z, true);
-      this.addWall(lanes[1], z);
-      this.addWall(lanes[2], z + rand(-0.6, 0.6));
+      this.addCrate(laneAt(0), z, true);
+      this.addWall(laneAt(1), z);
+      if (lanes.length > 2) this.addWall(laneAt(2), z + rand(-0.6, 0.6));
     } else if (roll < 0.90) {
       // cube line
-      for (let i = 0; i < 5; i++) this.addCube(LANE_X[lanes[0]], 0.9, z - i * 1.8);
-      if (Math.random() < 0.4) this.addCrate(lanes[1], z + 2);
+      for (let i = 0; i < 5; i++) this.addCube(LANE_X[laneAt(0)], 0.9, z - i * 1.8);
+      if (Math.random() < 0.4) this.addCrate(laneAt(1), z + 2);
     } else {
       // cube arc over a hurdle — jump to collect
-      this.addHurdle(lanes[0], z);
+      this.addHurdle(laneAt(0), z);
       for (let i = 0; i < 5; i++) {
         const t = i / 4;
-        this.addCube(LANE_X[lanes[0]], 0.9 + Math.sin(t * Math.PI) * 1.1, z + 2.4 - i * 1.2);
+        this.addCube(LANE_X[laneAt(0)], 0.9 + Math.sin(t * Math.PI) * 1.1, z + 2.4 - i * 1.2);
       }
     }
   }
 
   prefill() {
+    this.spawnTrain(-120); // early train encounter
     for (const z of [-40, -70, -100, -132]) this.spawnRow(z);
   }
 
   reset() {
+    while (this.trains.length) {
+      const t = this.trains[0];
+      this.release('trains', t, t.wagons === 2 ? 'train2' : 'train3');
+    }
     while (this.hazards.length) {
       const h = this.hazards[0];
       this.release('hazards', h, h.kind === 'duckbar' ? 'duckbar' : h.kind);
@@ -443,6 +586,8 @@ export class World {
     while (this.cubes.length) this.release('cubes', this.cubes[0], 'cube');
     this.distSinceSpawn = 0;
     this.nextGap = 8;
+    this.distSinceTrain = 0;
+    this.nextTrainGap = 420;
     this.prefill();
   }
 
@@ -471,6 +616,15 @@ export class World {
       if (c.mesh.position.z > KILL_Z) this.release('crates', c, c.gold ? 'crateGold' : 'crateWood');
     }
 
+    // trains
+    for (let i = this.trains.length - 1; i >= 0; i--) {
+      const t = this.trains[i];
+      t.mesh.position.z += dz;
+      if (t.mesh.position.z - t.len > KILL_Z) {
+        this.release('trains', t, t.wagons === 2 ? 'train2' : 'train3');
+      }
+    }
+
     const t = performance.now() / 1000;
     for (let i = this.cubes.length - 1; i >= 0; i--) {
       const c = this.cubes[i];
@@ -486,6 +640,14 @@ export class World {
       this.distSinceSpawn = 0;
       this.nextGap = rand(10, 16);
       this.spawnRow();
+    }
+
+    // occasional parked train (never while one is already on the track)
+    this.distSinceTrain += dz;
+    if (this.distSinceTrain >= this.nextTrainGap && this.trains.length === 0) {
+      this.distSinceTrain = 0;
+      this.nextTrainGap = rand(380, 620);
+      this.spawnTrain();
     }
   }
 }

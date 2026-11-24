@@ -32,7 +32,11 @@ const SFX_MIX = {
 const TARGET_PEAK = 0.42;  // every sound is scaled so its peak lands here
 const MAX_BOOST = 2.2;     // never amplify quiet files more than this
 const MASTER_LEVEL = 0.85; // headroom below the limiter
-const MAX_VOICES = 10;     // hard cap on overlapping sounds
+const MAX_VOICES = 16;     // soft cap on overlapping sounds
+const HARD_CAP = 24;       // absolute ceiling, even for priority sounds
+
+// Sounds that must always play, even at the voice cap (bust boom etc.)
+const PRIORITIZED = new Set(['bust']);
 
 class Sfx {
   constructor() {
@@ -82,21 +86,46 @@ class Sfx {
     return this.loading;
   }
 
-  /** Play a sound by name. Safe to call before init or for missing sounds. */
+  /**
+   * Play a sound by name. Safe to call before init or for missing sounds.
+   * Sounds are independent buffer sources, so different sounds (and even
+   * several copies of one sound) always mix simultaneously — the voice cap
+   * only exists to avoid an absurd pile-up, and priority sounds bypass it.
+   */
   play(name, rate) {
-    const ctx = this.ctx;
-    const snd = this.sounds[name];
-    if (!ctx || ctx.state !== 'running' || !snd || this.voices >= MAX_VOICES) return;
+    try {
+      const ctx = this.ctx;
+      const snd = this.sounds[name];
+      if (!ctx || ctx.state !== 'running' || !snd) return;
+      const isPriority = PRIORITIZED.has(name);
+      if (this.voices >= (isPriority ? HARD_CAP : MAX_VOICES)) return;
 
-    const src = ctx.createBufferSource();
-    src.buffer = snd.buffer;
-    src.playbackRate.value = rate ?? 0.94 + Math.random() * 0.12; // subtle pitch variance
-    const g = ctx.createGain();
-    g.gain.value = snd.gain * (SFX_MIX[name] ?? 1);
-    src.connect(g).connect(this.master);
-    this.voices++;
-    src.onended = () => { this.voices--; };
-    src.start();
+      const r = rate ?? 0.94 + Math.random() * 0.12; // subtle pitch variance
+      const src = ctx.createBufferSource();
+      src.buffer = snd.buffer;
+      src.playbackRate.value = r;
+      const g = ctx.createGain();
+      g.gain.value = snd.gain * (SFX_MIX[name] ?? 1);
+      src.connect(g).connect(this.master);
+
+      // free the voice slot when the sound ends — with a duration-based
+      // fallback too, because `onended` can be delayed/throttled on mobile,
+      // which used to leak slots and starve later sounds (e.g. the bust boom
+      // going silent right after a cube pickup)
+      this.voices++;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        this.voices--;
+      };
+      src.onended = release;
+      setTimeout(release, (snd.buffer.duration / r) * 1000 + 250);
+
+      src.start();
+    } catch (err) {
+      console.warn(`[sfx] failed to play "${name}":`, err.message);
+    }
   }
 
   /**

@@ -5,10 +5,9 @@
 // classic brawler archetypes.
 // ============================================================================
 
-export const BRAWLERS = [
-  {
+export const BRAWLERS = [  {
     id: 'shellby',
-    name: 'SHELLBY',
+    name: 'SHELLY',
     epithet: 'Shotgun Scrapper',
     attackName: 'Spread Shot',
     attackDesc: 'Blasts a wide cone of 5 pellets — shreds crates across every lane at close range.',
@@ -29,7 +28,7 @@ export const BRAWLERS = [
   },
   {
     id: 'colton',
-    name: 'COLTON',
+    name: 'COLT',
     epithet: 'Quickdraw Ranger',
     attackName: 'Rapid Stream',
     attackDesc: 'Unloads a tight burst of 6 fast bullets straight down the current lane.',
@@ -51,6 +50,7 @@ export const BRAWLERS = [
   {
     id: 'rocko',
     name: 'ROCKO',
+    hidden: true, // parked until the feel/look gets another pass
     epithet: 'Demolition Derby',
     attackName: 'Splash Rocket',
     attackDesc: 'Fires a rocket that detonates on impact, wrecking crates in adjacent lanes too.',
@@ -72,6 +72,7 @@ export const BRAWLERS = [
   {
     id: 'nitara',
     name: 'NITARA',
+    hidden: true, // parked until the feel/look gets another pass
     epithet: 'Spirit Caller',
     attackName: 'Piercing Wave',
     attackDesc: 'Sends a ground shockwave that barrels through every crate in its lane.',
@@ -91,7 +92,7 @@ export const BRAWLERS = [
   },
   {
     id: 'spino',
-    name: 'SPINO',
+    name: 'SPIKE',
     epithet: 'Prickly Genius',
     attackName: 'Splitting Orb',
     attackDesc: 'Launches an orb that bursts into 6 radial spikes wherever it hits.',
@@ -114,3 +115,6 @@ export const BRAWLERS = [
 export function getBrawler(id) {
   return BRAWLERS.find((b) => b.id === id) ?? BRAWLERS[0];
 }
+
+/** Brawlers currently selectable in the UI (hidden ones are parked). */
+export const SELECTABLE = BRAWLERS.filter((b) => !b.hidden);

@@ -4,7 +4,7 @@
 
 import './style.css';
 import * as THREE from 'three';
-import { BRAWLERS, getBrawler } from './brawlers.js';
+import { BRAWLERS, SELECTABLE, getBrawler } from './brawlers.js';
 import { World, LANE_X, toonMaterial } from './world.js';
 import { Combat, checkPlayerHit, collectCubes } from './combat.js';
 import { sfx } from './audio.js';
@@ -582,7 +582,8 @@ window.addEventListener('keydown', (e) => {
       break;
     default:
       if (game.state === 'select' && /^Digit[1-5]$/.test(e.code)) {
-        startRun(BRAWLERS[Number(e.code.slice(5)) - 1]);
+        const idx = Number(e.code.slice(5)) - 1;
+        if (SELECTABLE[idx]) startRun(SELECTABLE[idx]);
       }
   }
 });
@@ -762,7 +763,7 @@ function faceSVG(b) {
 // ---------------------------------------------------------------------------
 function buildCharSelect() {
   charCards.innerHTML = '';
-  BRAWLERS.forEach((b, i) => {
+  SELECTABLE.forEach((b, i) => {
     const card = document.createElement('button');
     card.className = 'char-card';
     card.innerHTML = `
@@ -770,7 +771,7 @@ function buildCharSelect() {
       <div class="char-name">${b.name}</div>
       <div class="char-epithet">${b.epithet}</div>
       <div class="char-attack"><b>${b.attackName}</b> — ${b.attackDesc}</div>
-      <div class="char-key">${b.keyHint} · ${'★'.repeat(b.stats.power)}${'☆'.repeat(5 - b.stats.power)}</div>
+      <div class="char-key">KEY ${i + 1} · ${'★'.repeat(b.stats.power)}${'☆'.repeat(5 - b.stats.power)}</div>
     `;
     card.addEventListener('click', () => startRun(b));
     card.addEventListener('mouseenter', () => showPreview(b));

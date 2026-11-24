@@ -38,6 +38,32 @@ export function toonMaterial(color, opts = {}) {
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 
+// ---------------------------------------------------------------------------
+// Power-cube glow: shared additive radial-gradient sprite (green-yellow halo)
+// ---------------------------------------------------------------------------
+let _glowTex = null;
+let _glowMat = null;
+function getGlow() {
+  if (_glowMat || typeof document === 'undefined') return _glowMat;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,190,0.85)');  // warm yellow core
+  grad.addColorStop(0.35, 'rgba(150,255,120,0.4)'); // green halo
+  grad.addColorStop(1, 'rgba(150,255,120,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  _glowTex = new THREE.CanvasTexture(c);
+  _glowMat = new THREE.SpriteMaterial({
+    map: _glowTex,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+  });
+  return _glowMat;
+}
+
 // Lightning-bolt silhouette for the Power Cube faces (2D shape, extruded)
 const boltShape = new THREE.Shape();
 boltShape.moveTo(0.1, 0.5);
@@ -77,11 +103,30 @@ export class World {
   // -------------------------------------------------------------------------
   buildEnvironment() {
     const scene = this.scene;
-    scene.background = new THREE.Color(0x7ad7ff);
+    this.skyColor = new THREE.Color(0x7ad7ff);
+    scene.background = this.skyColor;
     scene.fog = new THREE.Fog(0x8fdcff, 55, 160);
+    this.dayT = 0; // day/night cycle clock
+
+    // day/night palette anchors
+    this._day = {
+      sky: new THREE.Color(0x7ad7ff),
+      fog: new THREE.Color(0x8fdcff),
+      sun: new THREE.Color(0xfff3d0),
+      sunI: 2.4,
+      hemiI: 0.95,
+    };
+    this._night = {
+      sky: new THREE.Color(0x25335f), // dark blue, still readable
+      fog: new THREE.Color(0x2c3d6e),
+      sun: new THREE.Color(0x9db9ff), // cool moonlight tint
+      sunI: 1.15,
+      hemiI: 0.55,
+    };
 
     const hemi = new THREE.HemisphereLight(0xcdeeff, 0x63c556, 0.95);
     scene.add(hemi);
+    this.hemi = hemi;
 
     const sun = new THREE.DirectionalLight(0xfff3d0, 2.4);
     sun.position.set(14, 26, 8);
@@ -97,6 +142,25 @@ export class World {
     sun.target.position.set(0, 0, -30);
     scene.add(sun, sun.target);
     this.sun = sun;
+  }
+
+  /**
+   * Simple day/night cycle: over ~80s the sky, fog, and lighting drift from
+   * bright noon into a dark-blue evening and back. Night is intentionally
+   * clamped so the track stays clearly readable.
+   */
+  updateDayNight(dt) {
+    this.dayT += dt;
+    const CYCLE = 80; // seconds per full day→night→day cycle
+    const phase = (this.dayT % CYCLE) / CYCLE;
+    const night = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2); // 0 day ↔ 1 night
+    const d = night * 0.85;
+
+    this.skyColor.copy(this._day.sky).lerp(this._night.sky, d);
+    this.scene.fog.color.copy(this._day.fog).lerp(this._night.fog, d);
+    this.sun.color.copy(this._day.sun).lerp(this._night.sun, d);
+    this.sun.intensity = this._day.sunI + (this._night.sunI - this._day.sunI) * d;
+    this.hemi.intensity = this._day.hemiI + (this._night.hemiI - this._day.hemiI) * d;
   }
 
   // -------------------------------------------------------------------------
@@ -322,10 +386,20 @@ export class World {
     const g = new THREE.Group();
     const body = new THREE.Mesh(
       new RoundedBoxGeometry(0.72, 0.72, 0.3, 3, 0.09),
-      toonMaterial(0x2fd55c, { emissive: 0x0d8a36, emissiveIntensity: 0.55 })
+      toonMaterial(0x2fd55c, { emissive: 0x0d8a36, emissiveIntensity: 0.8 })
     );
     body.castShadow = true;
     g.add(body);
+
+    // soft green-yellow glow halo (billboard sprite, additive)
+    const glowMat = getGlow();
+    let glow = null;
+    if (glowMat) {
+      glow = new THREE.Sprite(glowMat);
+      glow.scale.setScalar(1.45);
+      glow.position.z = 0.01; // rides just off the slab surface
+      g.add(glow);
+    }
 
     const boltGeo = new THREE.ExtrudeGeometry(boltShape, { depth: 0.05, bevelEnabled: false });
     boltGeo.translate(0, 0, -0.025); // center the extrusion
@@ -342,7 +416,7 @@ export class World {
     }
 
     this.scene.add(g);
-    return { mesh: g, phase: Math.random() * Math.PI * 2, baseY: 0.9 };
+    return { mesh: g, glow, phase: Math.random() * Math.PI * 2, baseY: 0.9 };
   }
 
   // -------------------------------------------------------------------------
@@ -596,6 +670,7 @@ export class World {
   // -------------------------------------------------------------------------
   update(dt, speed) {
     const dz = speed * dt;
+    this.updateDayNight(dt);
 
     for (const seg of this.segments) {
       seg.position.z += dz;
@@ -631,6 +706,7 @@ export class World {
       c.mesh.position.z += dz;
       c.mesh.position.y = c.baseY + Math.sin(t * 3.2 + c.phase) * 0.14;
       c.mesh.rotation.y += dt * 2.4;
+      if (c.glow) c.glow.scale.setScalar(1.35 + Math.sin(t * 4.5 + c.phase) * 0.2); // breathing glow
       if (c.mesh.position.z > KILL_Z) this.release('cubes', c, 'cube');
     }
 
